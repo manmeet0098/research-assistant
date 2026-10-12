@@ -1,5 +1,6 @@
 """Paper search via Semantic Scholar, falling back to arXiv when rate-limited."""
 import os
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -12,6 +13,24 @@ ATOM = {"a": "http://www.w3.org/2005/Atom"}
 S2_TIMEOUT = 10
 S2_ATTEMPTS = 2
 S2_RETRY_DELAY = 1.2  # seconds; just over the 1 request/second limit
+S2_MIN_INTERVAL = 1.1  # the API key allows 1 request/second in total; stay under it
+
+_s2_lock = threading.Lock()
+_s2_last_call = 0.0
+
+
+def _s2_throttle() -> None:
+    """Block until at least S2_MIN_INTERVAL has passed since the last S2 request.
+
+    Requests are handled on a thread pool, so the lock serializes them: two
+    searches fired together are sent about a second apart instead of both 429ing.
+    """
+    global _s2_last_call
+    with _s2_lock:
+        wait = _s2_last_call + S2_MIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _s2_last_call = time.monotonic()
 ARXIV_TIMEOUT = 30  # arXiv's API is often slow (10s+ is common)
 ARXIV_ATTEMPTS = 2
 
@@ -21,6 +40,7 @@ def search_semantic_scholar(query: str, limit: int) -> list[dict]:
     if key := os.getenv("SEMANTIC_SCHOLAR_API_KEY"):
         headers["x-api-key"] = key
     for attempt in range(S2_ATTEMPTS):
+        _s2_throttle()
         resp = httpx.get(
             S2_URL,
             params={"query": query, "limit": limit, "fields": S2_FIELDS},
