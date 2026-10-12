@@ -2,11 +2,13 @@
 import json
 import os
 import re
+from collections.abc import Iterator
 
 import anthropic
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 MAX_PAPER_CHARS = 150_000  # ~40k tokens; fits comfortably in context
+CUT_OFF_NOTE = "\n\n*(Response was cut off at the length limit.)*"
 
 _client: anthropic.Anthropic | None = None
 
@@ -25,8 +27,18 @@ def _ask(system: str, messages: list[dict], max_tokens: int = 1500) -> str:
     text = "".join(b.text for b in resp.content if b.type == "text").strip()
     if resp.stop_reason == "max_tokens":
         # Never present a cut-off answer as if it were complete.
-        text += "\n\n*(Response was cut off at the length limit.)*"
+        text += CUT_OFF_NOTE
     return text
+
+
+def _stream(system: str, messages: list[dict], max_tokens: int = 1500) -> Iterator[str]:
+    """Yield the response text as it is generated."""
+    with client().messages.stream(
+        model=MODEL, max_tokens=max_tokens, system=system, messages=messages
+    ) as stream:
+        yield from stream.text_stream
+        if stream.get_final_message().stop_reason == "max_tokens":
+            yield CUT_OFF_NOTE
 
 
 def extract_metadata(first_page: str) -> dict:
@@ -56,7 +68,7 @@ def _paper_block(paper: dict) -> tuple[str, bool]:
     return f"Title: {paper['title']}\nAbstract: {paper.get('abstract') or '(none)'}", False
 
 
-def summarize(paper: dict) -> str:
+def _summary_request(paper: dict) -> tuple[str, list[dict], int]:
     body, full = _paper_block(paper)
     system = (
         "You are a research assistant. Write a summary of the paper for a graduate student "
@@ -75,12 +87,13 @@ def summarize(paper: dict) -> str:
             " Only the title and abstract are available, so start by noting that this summary "
             "is based on the abstract alone."
         )
-    return _ask(
-        system, [{"role": "user", "content": f"<paper>\n{body}\n</paper>"}], max_tokens=2000
-    )
+    messages = [{"role": "user", "content": f"<paper>\n{body}\n</paper>"}]
+    return system, messages, 2000
 
 
-def answer(paper: dict, question: str, history: list[dict] | None = None) -> str:
+def _answer_request(
+    paper: dict, question: str, history: list[dict] | None
+) -> tuple[str, list[dict], int]:
     body, full = _paper_block(paper)
     system = (
         "You answer questions about a single research paper, provided below in <paper> tags. "
@@ -97,4 +110,20 @@ def answer(paper: dict, question: str, history: list[dict] | None = None) -> str
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
     messages.append({"role": "user", "content": question})
-    return _ask(system, messages)
+    return system, messages, 1500
+
+
+def summarize(paper: dict) -> str:
+    return _ask(*_summary_request(paper))
+
+
+def answer(paper: dict, question: str, history: list[dict] | None = None) -> str:
+    return _ask(*_answer_request(paper, question, history))
+
+
+def stream_summary(paper: dict) -> Iterator[str]:
+    return _stream(*_summary_request(paper))
+
+
+def stream_answer(paper: dict, question: str, history: list[dict] | None = None) -> Iterator[str]:
+    return _stream(*_answer_request(paper, question, history))

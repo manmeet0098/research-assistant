@@ -25,3 +25,29 @@ export function uploadPdf(file) {
   form.append('file', file)
   return request('/upload', { method: 'POST', body: form })
 }
+
+// Read a streamed plain-text response, calling onText(fullTextSoFar) as it grows.
+async function streamText(path, options, onText) {
+  const res = await fetch(`/api${path}`, options)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Request failed (${res.status})`)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    text += decoder.decode(value, { stream: true })
+    onText(text)
+  }
+  text += decoder.decode()
+  onText(text)
+  return text
+}
+
+export const streamSummary = (id, refresh, onText) =>
+  streamText(`/library/${id}/summarize/stream?refresh=${refresh}`, { method: 'POST' }, onText)
+export const streamAnswer = (id, question, history, onText) =>
+  streamText(`/library/${id}/ask/stream`, json({ question, history }), onText)

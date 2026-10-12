@@ -9,6 +9,7 @@ import anthropic
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import db
@@ -60,6 +61,36 @@ def llm_call(fn, *args):
         raise HTTPException(502, "Anthropic API key was rejected. Check ANTHROPIC_API_KEY in backend/.env")
     except anthropic.APIError as e:
         raise HTTPException(502, f"LLM request failed: {e}")
+
+
+def text_stream(chunks, on_done=None) -> StreamingResponse:
+    """Stream LLM text to the client as plain text.
+
+    The first chunk is pulled before the response starts, so a rejected API key or
+    an upstream failure becomes a normal HTTP error instead of a half-open stream.
+    `on_done` receives the full text once the stream finishes normally.
+    """
+    chunks = iter(chunks)
+    first = llm_call(next, chunks, "")
+
+    def body():
+        parts = [first]
+        yield first
+        try:
+            for chunk in chunks:
+                parts.append(chunk)
+                yield chunk
+        except anthropic.APIError as e:
+            yield f"\n\n*(Stream interrupted: {e})*"
+            return
+        if on_done:
+            on_done("".join(parts))
+
+    return StreamingResponse(
+        body(),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------- search ----------
@@ -173,3 +204,26 @@ def ask_paper(paper_id: int, body: AskIn):
         raise HTTPException(400, "Question is empty")
     paper = db.row_to_paper(get_paper_row(paper_id), include_text=True)
     return {"answer": llm_call(llm.answer, paper, body.question.strip(), body.history)}
+
+
+# Streaming variants: same behavior, but text arrives as it is generated.
+@app.post("/api/library/{paper_id}/summarize/stream")
+def summarize_paper_stream(paper_id: int, refresh: bool = False):
+    row = get_paper_row(paper_id)
+    if row["summary"] and not refresh:
+        return text_stream([row["summary"]])
+
+    def save(summary: str) -> None:
+        with db.get_conn() as conn:
+            conn.execute("UPDATE papers SET summary = ? WHERE id = ?", (summary, paper_id))
+
+    paper = db.row_to_paper(row, include_text=True)
+    return text_stream(llm.stream_summary(paper), on_done=save)
+
+
+@app.post("/api/library/{paper_id}/ask/stream")
+def ask_paper_stream(paper_id: int, body: AskIn):
+    if not body.question.strip():
+        raise HTTPException(400, "Question is empty")
+    paper = db.row_to_paper(get_paper_row(paper_id), include_text=True)
+    return text_stream(llm.stream_answer(paper, body.question.strip(), body.history))

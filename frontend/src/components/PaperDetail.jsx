@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { askPaper, summarizePaper } from '../api'
+import { streamAnswer, streamSummary } from '../api'
 
 export default function PaperDetail({ paper, onClose }) {
   const [summary, setSummary] = useState(paper.summary)
@@ -13,15 +13,21 @@ export default function PaperDetail({ paper, onClose }) {
   const endRef = useRef(null)
 
   useEffect(() => {
-    if (messages.length > 0) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (messages.length > 0) endRef.current?.scrollIntoView({ behavior: 'auto', block: 'nearest' })
   }, [messages, asking])
 
   async function runSummary(refresh = false) {
+    const previous = summary
+    let received = false
     setSummarizing(true)
     setError('')
     try {
-      setSummary((await summarizePaper(paper.id, refresh)).summary)
+      await streamSummary(paper.id, refresh, (text) => {
+        received = true
+        setSummary(text)
+      })
     } catch (e) {
+      if (!received) setSummary(previous)
       setError(e.message)
     } finally {
       setSummarizing(false)
@@ -31,14 +37,17 @@ export default function PaperDetail({ paper, onClose }) {
   async function ask(q) {
     if (!q.trim() || asking) return
     const history = messages
-    setMessages([...history, { role: 'user', content: q }])
+    setMessages([...history, { role: 'user', content: q }, { role: 'assistant', content: '' }])
     setQuestion('')
     setAsking(true)
     setError('')
+    const setAnswer = (content) =>
+      setMessages((m) => [...m.slice(0, -1), { role: 'assistant', content }])
     try {
-      const { answer } = await askPaper(paper.id, q, history)
-      setMessages((m) => [...m, { role: 'assistant', content: answer }])
+      await streamAnswer(paper.id, q, history, setAnswer)
     } catch (e) {
+      // Drop the empty placeholder bubble if nothing arrived.
+      setMessages((m) => (m.at(-1)?.content ? m : m.slice(0, -1)))
       setError(e.message)
     } finally {
       setAsking(false)
@@ -70,17 +79,22 @@ export default function PaperDetail({ paper, onClose }) {
         <p className="muted">No summary yet.</p>
       )}
       <button onClick={() => runSummary(Boolean(summary))} disabled={summarizing}>
-        {summarizing ? 'Summarizing…' : summary ? 'Regenerate summary' : 'Generate summary'}
+        {summarizing ? 'Writing…' : summary ? 'Regenerate summary' : 'Generate summary'}
       </button>
 
       <h4>Ask a question</h4>
       <div className="chat">
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
-            {m.role === 'assistant' ? <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown> : m.content}
+            {m.role !== 'assistant' ? (
+              m.content
+            ) : m.content ? (
+              <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>
+            ) : (
+              <span className="muted">Thinking…</span>
+            )}
           </div>
         ))}
-        {asking && <div className="msg assistant muted">Thinking…</div>}
         <div ref={endRef} />
       </div>
       {messages.length === 0 && (
