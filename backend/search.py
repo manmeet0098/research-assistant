@@ -1,5 +1,6 @@
 """Paper search via Semantic Scholar, falling back to arXiv when rate-limited."""
 import os
+import time
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -9,6 +10,8 @@ S2_FIELDS = "title,authors,year,abstract,url,openAccessPdf"
 ARXIV_URL = "https://export.arxiv.org/api/query"
 ATOM = {"a": "http://www.w3.org/2005/Atom"}
 S2_TIMEOUT = 10
+S2_ATTEMPTS = 2
+S2_RETRY_DELAY = 1.2  # seconds; just over the 1 request/second limit
 ARXIV_TIMEOUT = 30  # arXiv's API is often slow (10s+ is common)
 ARXIV_ATTEMPTS = 2
 
@@ -17,12 +20,19 @@ def search_semantic_scholar(query: str, limit: int) -> list[dict]:
     headers = {}
     if key := os.getenv("SEMANTIC_SCHOLAR_API_KEY"):
         headers["x-api-key"] = key
-    resp = httpx.get(
-        S2_URL,
-        params={"query": query, "limit": limit, "fields": S2_FIELDS},
-        headers=headers,
-        timeout=S2_TIMEOUT,
-    )
+    for attempt in range(S2_ATTEMPTS):
+        resp = httpx.get(
+            S2_URL,
+            params={"query": query, "limit": limit, "fields": S2_FIELDS},
+            headers=headers,
+            timeout=S2_TIMEOUT,
+        )
+        # The key's rate limit is about 1 request/second, so a lone 429 usually
+        # clears after a short wait; retry once before falling back to arXiv.
+        if resp.status_code == 429 and attempt < S2_ATTEMPTS - 1:
+            time.sleep(S2_RETRY_DELAY)
+            continue
+        break
     resp.raise_for_status()
     results = []
     for p in resp.json().get("data", []):
