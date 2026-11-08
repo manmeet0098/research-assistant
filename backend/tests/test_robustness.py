@@ -1,8 +1,8 @@
 """Edge cases and failure modes, written against the INTENDED behaviour.
 
-Tests marked xfail(strict=True) document confirmed bugs: they assert what the app
-should do and currently fail. strict=True turns an unexpected pass (i.e. the bug being
-fixed) into a failure, so the marker must be removed together with the fix.
+Each "Regression test for BUG-n" was written while the bug existed (as a strict xfail,
+see git tag hw2-round2), failed for the right reason, and started passing once the bug
+was fixed. They now guard against the bug coming back.
 """
 import gc
 import warnings
@@ -20,7 +20,7 @@ def upload(client, data, name="paper.pdf"):
 
 
 # ---------- metadata extraction must be best-effort ----------
-@pytest.mark.xfail(strict=True, reason="BUG-1: malformed JSON from the LLM crashes the upload (HTTP 500)")
+# Regression test for BUG-1 (fixed): malformed JSON from the LLM crashes the upload (HTTP 500)
 def test_upload_survives_malformed_json_from_the_llm(lenient_client, fake_llm):
     fake_llm.reply = '{title: "no quotes", authors: [Ann]}'
     response = upload(lenient_client, make_pdf("some text"), name="paper.pdf")
@@ -28,7 +28,7 @@ def test_upload_survives_malformed_json_from_the_llm(lenient_client, fake_llm):
     assert response.json()["title"] == "paper"  # falls back to the filename
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-2: wrongly typed metadata fields crash the upload or corrupt authors")
+# Regression test for BUG-2 (fixed): wrongly typed metadata fields crash the upload or corrupt authors
 @pytest.mark.parametrize(
     "reply, acceptable_authors",
     [
@@ -50,7 +50,7 @@ def test_upload_tolerates_wrongly_typed_metadata(lenient_client, fake_llm, reply
 
 
 # ---------- input validation ----------
-@pytest.mark.xfail(strict=True, reason="BUG-3: non-positive search limits are passed straight to the providers")
+# Regression test for BUG-3 (fixed): non-positive search limits are passed straight to the providers
 @pytest.mark.parametrize("limit", [0, -5])
 def test_search_does_not_accept_a_non_positive_limit(client, mock_http, limit):
     route = mock_http.get(search.S2_URL).respond(json={"data": []})
@@ -61,7 +61,7 @@ def test_search_does_not_accept_a_non_positive_limit(client, mock_http, limit):
 
 
 # ---------- resources ----------
-@pytest.mark.xfail(strict=True, reason="BUG-4: sqlite3 connections opened with `with db.get_conn()` are never closed")
+# Regression test for BUG-4 (fixed): sqlite3 connections opened with `with db.get_conn()` are never closed
 def test_database_connections_are_closed(client, saved_paper):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
@@ -74,7 +74,7 @@ def test_database_connections_are_closed(client, saved_paper):
 
 
 # ---------- races ----------
-@pytest.mark.xfail(strict=True, reason="BUG-5: saving a paper twice at once hits the UNIQUE constraint (HTTP 500)")
+# Regression test for BUG-5 (fixed): saving a paper twice at once hits the UNIQUE constraint (HTTP 500)
 def test_simultaneous_duplicate_save_is_idempotent(lenient_client, monkeypatch):
     def racing_download(url):
         # Another request saves the same paper after our duplicate check but before our INSERT.

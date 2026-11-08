@@ -3,7 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { streamAnswer, streamSummary } from '../api'
 
-export default function PaperDetail({ paper, onClose }) {
+export default function PaperDetail({ paper, onClose, onSummary }) {
   const [summary, setSummary] = useState(paper.summary)
   const [summarizing, setSummarizing] = useState(false)
   const [messages, setMessages] = useState([])
@@ -22,10 +22,11 @@ export default function PaperDetail({ paper, onClose }) {
     setSummarizing(true)
     setError('')
     try {
-      await streamSummary(paper.id, refresh, (text) => {
+      const text = await streamSummary(paper.id, refresh, (partial) => {
         received = true
-        setSummary(text)
+        setSummary(partial)
       })
+      onSummary?.(paper.id, text) // let the library remember it, so reopening shows it
     } catch (e) {
       if (!received) setSummary(previous)
       setError(e.message)

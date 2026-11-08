@@ -170,8 +170,9 @@ describe('App', () => {
     expect(api.deletePaper).not.toHaveBeenCalled()
   })
 
-  // BUG-6: PaperDetail starts from the stale library copy, so a summary generated earlier is not shown again.
-  it.fails('shows a generated summary again after closing and reopening the paper', async () => {
+  // Regression test for BUG-6 (fixed): PaperDetail started from a stale library copy, so a summary generated
+  // earlier was not shown again after closing and reopening the paper.
+  it('shows a generated summary again after closing and reopening the paper', async () => {
     // A stand-in for the backend: it remembers the summary once one is generated.
     const library = [{ ...saved }]
     api.listLibrary.mockImplementation(async () => library.map((p) => ({ ...p })))

@@ -51,14 +51,30 @@ def extract_metadata(first_page: str) -> dict:
     )
     raw = _ask(system, [{"role": "user", "content": first_page}], max_tokens=1500)
     match = re.search(r"\{.*\}", raw, re.DOTALL)
-    data = json.loads(match.group(0)) if match else {}
+    try:
+        data = json.loads(match.group(0)) if match else {}
+    except ValueError:  # the model produced something that only looks like JSON
+        data = {}
     year = data.get("year")
     return {
-        "title": (data.get("title") or "").strip(),
-        "authors": [a for a in data.get("authors") or [] if isinstance(a, str)],
-        "year": year if isinstance(year, int) else None,
-        "abstract": (data.get("abstract") or "").strip(),
+        "title": _text(data.get("title")),
+        "authors": _authors(data.get("authors")),
+        "year": year if isinstance(year, int) and not isinstance(year, bool) else None,
+        "abstract": _text(data.get("abstract")),
     }
+
+
+def _text(value) -> str:
+    """Metadata is best-effort: anything that is not a string counts as missing."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _authors(value) -> list[str]:
+    if isinstance(value, str):  # a single name must not be split into letters
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [a.strip() for a in value if isinstance(a, str) and a.strip()]
 
 
 def _paper_block(paper: dict) -> tuple[str, bool]:

@@ -60,6 +60,9 @@ export default function App() {
     })
   }
 
+  const onSummary = (id, summary) =>
+    setLibrary((papers) => papers.map((p) => (p.id === id ? { ...p, summary } : p)))
+
   const onDelete = (paper) =>
     run('delete', async () => {
       if (!window.confirm(`Remove "${paper.title}" from your library?`)) return
@@ -151,7 +154,7 @@ export default function App() {
               />
             ))}
           </div>
-          {selected && <PaperDetail key={selected.id} paper={selected} onClose={() => setSelectedId(null)} />}
+          {selected && <PaperDetail key={selected.id} paper={selected} onClose={() => setSelectedId(null)} onSummary={onSummary} />}
         </main>
       )}
     </div>

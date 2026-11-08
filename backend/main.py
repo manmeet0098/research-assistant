@@ -7,7 +7,7 @@ import sqlite3
 
 import anthropic
 import httpx
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -95,7 +95,7 @@ def text_stream(chunks, on_done=None) -> StreamingResponse:
 
 # ---------- search ----------
 @app.get("/api/search")
-def search(q: str, limit: int = 10):
+def search(q: str, limit: int = Query(10, ge=1)):
     if not q.strip():
         raise HTTPException(400, "Query is empty")
     try:
@@ -141,13 +141,23 @@ def save_paper(p: PaperIn):
             except Exception:
                 full_text = None
 
-    with db.get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO papers (external_id, title, authors, year, abstract, url, source, full_text)"
-            " VALUES (?, ?, ?, ?, ?, ?, 'search', ?)",
-            (p.external_id, p.title, json.dumps(p.authors), p.year, p.abstract, p.url, full_text),
-        )
-        paper_id = cur.lastrowid
+    try:
+        with db.get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO papers (external_id, title, authors, year, abstract, url, source, full_text)"
+                " VALUES (?, ?, ?, ?, ?, ?, 'search', ?)",
+                (p.external_id, p.title, json.dumps(p.authors), p.year, p.abstract, p.url, full_text),
+            )
+            paper_id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        # A simultaneous request saved the same paper first; saving is idempotent.
+        with db.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT * FROM papers WHERE external_id = ?", (p.external_id,)
+            ).fetchone()
+        if existing is None:
+            raise
+        return db.row_to_paper(existing)
     return db.row_to_paper(get_paper_row(paper_id))
 
 
