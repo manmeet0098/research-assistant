@@ -88,6 +88,8 @@ If `npm run dev` fails with `Cannot find native binding` (a known npm bug with o
 | POST | `/api/upload` | Upload a PDF (multipart `file`) |
 | POST | `/api/library/{id}/summarize` | Generate or fetch the cached summary |
 | POST | `/api/library/{id}/ask` | Ask a question (`{question, history}`) |
+| POST | `/api/library/{id}/summarize/stream` | Same as `summarize`, streamed as plain text |
+| POST | `/api/library/{id}/ask/stream` | Same as `ask`, streamed as plain text |
 
 FastAPI also serves interactive docs at http://localhost:8000/docs.
 
@@ -95,5 +97,50 @@ FastAPI also serves interactive docs at http://localhost:8000/docs.
 
 - Scanned (image-only) PDFs are not supported, since there is no OCR.
 - Some search results have no open-access PDF, so they stay abstract-only.
-- Summaries and answers are not streamed, so a long paper can take 15–20 seconds.
+- Semantic Scholar's API key allows 1 request/second, so searches are spaced out; if it still fails, search falls back to arXiv.
 - Single-user, local-only app with no authentication.
+
+## Testing
+
+The tests never call real services: Semantic Scholar, arXiv and Claude are mocked, and every test uses its
+own temporary SQLite database. They need no API keys and cost nothing to run.
+
+### Backend (pytest)
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest                                   # run the tests
+python -m pytest --cov --cov-branch --cov-report=term-missing   # with line + branch coverage
+```
+
+Mutation testing (injects small bugs into the code and checks the tests notice; takes about a minute):
+
+```bash
+mutmut run          # then: mutmut results   |   mutmut show <name>
+```
+
+### Frontend (Vitest + Testing Library)
+
+```bash
+cd frontend
+npm install
+npm test                 # run the tests
+npm run test:coverage    # with coverage
+```
+
+### Where the tests are
+
+| Path | What it covers |
+|---|---|
+| `backend/tests/test_db.py`, `test_pdf.py`, `test_search.py`, `test_llm.py` | Unit tests for each backend module |
+| `backend/tests/test_api_*.py` | The HTTP API end to end (search, library, upload, summaries, questions, streaming) |
+| `backend/tests/test_requirements.py` | Acceptance tests derived from the HW1 requirements |
+| `backend/tests/test_surviving_mutants.py` | Tests added for faults the mutation run found undetected |
+| `backend/tests/test_robustness.py` | Regression tests for six bugs the suite found |
+| `frontend/src/**/*.test.{js,jsx}` | API client, `PaperCard`, `PaperDetail`, and the `App` flows |
+
+The suite was built in stages; each stage is tagged in git so the progression can be reproduced:
+`hw2-round0` (initial), `hw2-round1`, `hw2-round2` (still shows the six bugs as expected failures), `hw2-bugfixes`.
+
