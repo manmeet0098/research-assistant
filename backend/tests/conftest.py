@@ -44,7 +44,7 @@ class FakeStream:
 
     @property
     def text_stream(self):
-        chunks = self.fake.chunks or [self.fake.reply]
+        chunks = self.fake.chunks if self.fake.chunks is not None else [self.fake.reply]
         for i, chunk in enumerate(chunks):
             if self.fake.error_after is not None and i == self.fake.error_after:
                 raise api_error()
@@ -108,6 +108,13 @@ def fast_search(monkeypatch):
 @pytest.fixture
 def client():
     return TestClient(main.app)
+
+
+@pytest.fixture
+def lenient_client():
+    """Like `client`, but an unhandled server error comes back as a 500 response
+    instead of re-raising inside the test, so bugs show up as failed assertions."""
+    return TestClient(main.app, raise_server_exceptions=False)
 
 
 @pytest.fixture

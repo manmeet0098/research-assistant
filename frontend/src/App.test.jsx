@@ -169,4 +169,34 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
     expect(api.deletePaper).not.toHaveBeenCalled()
   })
+
+  // BUG-6: PaperDetail starts from the stale library copy, so a summary generated earlier is not shown again.
+  it.fails('shows a generated summary again after closing and reopening the paper', async () => {
+    // A stand-in for the backend: it remembers the summary once one is generated.
+    const library = [{ ...saved }]
+    api.listLibrary.mockImplementation(async () => library.map((p) => ({ ...p })))
+    api.streamSummary.mockImplementation(async (id, refresh, onText) => {
+      library[0].summary = 'Generated summary'
+      onText('Generated summary')
+      return 'Generated summary'
+    })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (1)' }))
+    await userEvent.click(screen.getByRole('heading', { name: 'Saved Paper' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Generate summary' }))
+    expect(await screen.findByText('Generated summary')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    await userEvent.click(screen.getByRole('heading', { name: 'Saved Paper' }))
+    expect(await screen.findByText('Generated summary')).toBeInTheDocument()
+  })
+
+  it('shows an error and lets the user retry when saving fails', async () => {
+    api.searchPapers.mockResolvedValue({ provider: 'semantic_scholar', results: [result] })
+    api.savePaper.mockRejectedValue(new Error('Request failed (500)'))
+    render(<App />)
+    await userEvent.type(screen.getByPlaceholderText(/search papers/i), 'x{Enter}')
+    await userEvent.click(await screen.findByRole('button', { name: 'Save to library' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Request failed (500)')
+    expect(screen.getByRole('button', { name: 'Save to library' })).toBeEnabled()
+  })
 })

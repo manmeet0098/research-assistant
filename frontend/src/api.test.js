@@ -121,3 +121,27 @@ describe('streaming helpers', () => {
     await expect(streamSummary(1, false, () => {})).rejects.toThrow('LLM request failed')
   })
 })
+
+describe('streaming edge cases', () => {
+  it('decodes a multi-byte character that is split across chunks', async () => {
+    const bytes = new TextEncoder().encode('café')
+    const split = bytes.length - 1 // cut inside the two-byte "é"
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, split))
+          controller.enqueue(bytes.slice(split))
+          controller.close()
+        },
+      }),
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    expect(await streamSummary(1, false, () => {})).toBe('café')
+  })
+
+  it('handles an empty stream', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([])))
+    expect(await streamAnswer(1, 'q', [], () => {})).toBe('')
+  })
+})
+
