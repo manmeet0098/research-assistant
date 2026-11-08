@@ -27,10 +27,6 @@ def test_summarize_refresh_regenerates(client, fake_llm, saved_paper):
     assert body == {"summary": "new", "cached": False}
 
 
-def test_summarize_unknown_paper_is_404(client):
-    assert client.post("/api/library/999/summarize").status_code == 404
-
-
 def test_summarize_reports_502_on_rejected_key(client, fake_llm, saved_paper):
     fake_llm.error = auth_error()
     response = client.post(f"/api/library/{saved_paper['id']}/summarize")
@@ -61,10 +57,6 @@ def test_ask_passes_history_and_question_to_the_llm(client, fake_llm, saved_pape
 def test_ask_rejects_blank_question(client, saved_paper):
     response = client.post(f"/api/library/{saved_paper['id']}/ask", json={"question": "   "})
     assert response.status_code == 400
-
-
-def test_ask_unknown_paper_is_404(client):
-    assert client.post("/api/library/999/ask", json={"question": "q"}).status_code == 404
 
 
 def test_ask_reports_502_on_llm_failure(client, fake_llm, saved_paper):

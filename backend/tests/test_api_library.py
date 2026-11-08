@@ -1,4 +1,7 @@
+import sqlite3
+
 import httpx
+import pytest
 
 import db
 from helpers import PAPER, make_pdf
@@ -10,11 +13,20 @@ def test_library_starts_empty(client):
 
 def test_save_paper_stores_metadata(client):
     saved = client.post("/api/library", json=PAPER).json()
-    assert saved["title"] == "Sparse Widget Routing"
-    assert saved["authors"] == ["Dana Okafor", "Lee Whitfield"]
-    assert saved["year"] == 2024
-    assert saved["source"] == "search"
-    assert saved["has_full_text"] is False
+    assert saved == {
+        "id": saved["id"],
+        "external_id": "s2:abc123",
+        "title": "Sparse Widget Routing",
+        "authors": ["Dana Okafor", "Lee Whitfield"],
+        "year": 2024,
+        "abstract": "We route widgets sparsely.",
+        "url": "https://example.org/paper",
+        "source": "search",
+        "has_full_text": False,
+        "summary": None,
+        "created_at": saved["created_at"],
+    }
+    assert saved["created_at"]  # timestamp is set
 
 
 def test_saved_paper_appears_in_library_and_by_id(client, saved_paper):
@@ -53,8 +65,21 @@ def test_library_lists_newest_first(client):
     assert [p["title"] for p in client.get("/api/library").json()] == ["second", "first"]
 
 
-def test_get_unknown_paper_is_404(client):
-    assert client.get("/api/library/999").status_code == 404
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        ("get", "/api/library/999", None),
+        ("delete", "/api/library/999", None),
+        ("post", "/api/library/999/summarize", None),
+        ("post", "/api/library/999/summarize/stream", None),
+        ("post", "/api/library/999/ask", {"question": "q"}),
+        ("post", "/api/library/999/ask/stream", {"question": "q"}),
+    ],
+)
+def test_unknown_paper_is_404_on_every_route(client, method, path, body):
+    response = client.request(method, path, json=body)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Paper not found"
 
 
 def test_delete_removes_paper(client, saved_paper):
@@ -62,11 +87,35 @@ def test_delete_removes_paper(client, saved_paper):
     assert client.get("/api/library").json() == []
 
 
-def test_delete_unknown_paper_is_404(client):
-    assert client.delete("/api/library/999").status_code == 404
-
-
 def test_saved_papers_persist_in_the_database_file(client, saved_paper):
-    # A brand-new connection (as after an app restart) still sees the paper.
-    with db.get_conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+    # Read the file with an independent connection, as a restarted app would.
+    raw = sqlite3.connect(db.DB_PATH)
+    try:
+        rows = raw.execute("SELECT title, authors FROM papers").fetchall()
+    finally:
+        raw.close()
+    assert rows == [("Sparse Widget Routing", '["Dana Okafor", "Lee Whitfield"]')]
+
+
+def test_save_survives_a_failed_text_extraction(client, mock_http):
+    # Looks like a PDF (passes the download check) but cannot be parsed.
+    mock_http.get("https://example.org/p.pdf").respond(content=b"%PDF-1.4 not really a pdf")
+    saved = client.post("/api/library", json={**PAPER, "pdf_url": "https://example.org/p.pdf"}).json()
+    assert saved["has_full_text"] is False
+
+
+def test_startup_creates_the_schema_on_a_fresh_database(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "fresh.db")
+    assert not (tmp_path / "fresh.db").exists()
+    with TestClient(main.app) as fresh:  # entering the context runs startup
+        assert fresh.get("/api/library").json() == []
+
+
+def test_save_without_an_external_id_is_allowed(client):
+    saved = client.post("/api/library", json={**PAPER, "external_id": None}).json()
+    assert saved["external_id"] is None
+    assert saved["title"] == PAPER["title"]

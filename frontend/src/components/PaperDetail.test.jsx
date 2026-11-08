@@ -91,3 +91,69 @@ describe('PaperDetail questions', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 })
+
+describe('PaperDetail edge cases', () => {
+  it('sends earlier turns as history on a follow-up question', async () => {
+    api.streamAnswer.mockImplementation(async (id, q, history, onText) => onText(`answer to ${q}`))
+    render(<PaperDetail paper={paper} onClose={() => {}} />)
+    const box = screen.getByPlaceholderText(/ask anything/i)
+    await userEvent.type(box, 'first{Enter}')
+    await screen.findByText('answer to first')
+    await userEvent.type(box, 'second{Enter}')
+    await screen.findByText('answer to second')
+    expect(api.streamAnswer).toHaveBeenLastCalledWith(
+      1,
+      'second',
+      [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'answer to first' },
+      ],
+      expect.any(Function),
+    )
+  })
+
+  it('ignores a second question while one is still being answered', async () => {
+    api.streamAnswer.mockImplementation(() => new Promise(() => {}))
+    render(<PaperDetail paper={paper} onClose={() => {}} />)
+    const box = screen.getByPlaceholderText(/ask anything/i)
+    await userEvent.type(box, 'one{Enter}')
+    await userEvent.type(box, 'two{Enter}')
+    expect(api.streamAnswer).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit a blank question', async () => {
+    render(<PaperDetail paper={paper} onClose={() => {}} />)
+    await userEvent.type(screen.getByPlaceholderText(/ask anything/i), '   {Enter}')
+    expect(api.streamAnswer).not.toHaveBeenCalled()
+  })
+
+  it('keeps a partial answer and shows the error when the stream breaks midway', async () => {
+    api.streamAnswer.mockImplementation(async (id, q, history, onText) => {
+      onText('partial answer')
+      throw new Error('connection lost')
+    })
+    render(<PaperDetail paper={paper} onClose={() => {}} />)
+    await userEvent.type(screen.getByPlaceholderText(/ask anything/i), 'q{Enter}')
+    expect(await screen.findByText('connection lost')).toBeInTheDocument()
+    expect(screen.getByText('partial answer')).toBeInTheDocument()
+  })
+
+  it('keeps the partial summary when generation breaks midway', async () => {
+    api.streamSummary.mockImplementation(async (id, refresh, onText) => {
+      onText('partial summary')
+      throw new Error('connection lost')
+    })
+    render(<PaperDetail paper={{ ...paper, summary: 'Old summary' }} onClose={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Regenerate summary' }))
+    expect(await screen.findByText('partial summary')).toBeInTheDocument()
+    expect(screen.queryByText('Old summary')).not.toBeInTheDocument()
+  })
+
+  it('passes refresh=true when regenerating an existing summary', async () => {
+    api.streamSummary.mockResolvedValue('new')
+    render(<PaperDetail paper={{ ...paper, summary: 'Old' }} onClose={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Regenerate summary' }))
+    expect(api.streamSummary).toHaveBeenCalledWith(1, true, expect.any(Function))
+  })
+})
+

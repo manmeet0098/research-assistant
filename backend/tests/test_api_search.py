@@ -34,10 +34,6 @@ def test_search_whitespace_query_is_rejected(client):
     assert client.get("/api/search", params={"q": "   "}).status_code == 400
 
 
-def test_search_missing_query_is_rejected(client):
-    assert client.get("/api/search").status_code == 422
-
-
 def test_search_limit_is_capped_at_25(client, mock_http):
     route = mock_http.get(search.S2_URL).respond(json={"data": []})
     client.get("/api/search", params={"q": "x", "limit": 1000})

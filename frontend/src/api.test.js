@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  askPaper,
   deletePaper,
   listLibrary,
   savePaper,
@@ -64,6 +65,14 @@ describe('request helpers', () => {
     const fetch = mockFetch(jsonResponse({ summary: 's' }))
     await summarizePaper(2, true)
     expect(fetch.mock.calls[0][0]).toBe('/api/library/2/summarize?refresh=true')
+  })
+
+  it('askPaper POSTs the question and history', async () => {
+    const fetch = mockFetch(jsonResponse({ answer: 'a' }))
+    await askPaper(5, 'why', [])
+    const [url, options] = fetch.mock.calls[0]
+    expect(url).toBe('/api/library/5/ask')
+    expect(JSON.parse(options.body)).toEqual({ question: 'why', history: [] })
   })
 
   it('uploadPdf sends the file as multipart form data', async () => {

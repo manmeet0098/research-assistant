@@ -41,8 +41,7 @@ describe('App', () => {
   it('searches and lists results', async () => {
     api.searchPapers.mockResolvedValue({ provider: 'semantic_scholar', results: [result] })
     render(<App />)
-    await userEvent.type(screen.getByPlaceholderText(/search papers/i), 'widgets')
-    await userEvent.click(screen.getByRole('button', { name: 'Search', hidden: false, exact: true, description: '' }).closest('form').querySelector('button'))
+    await userEvent.type(screen.getByPlaceholderText(/search papers/i), 'widgets{Enter}')
     expect(await screen.findByText('Search Result')).toBeInTheDocument()
     expect(api.searchPapers).toHaveBeenCalledWith('widgets')
     expect(screen.getByText(/from Semantic Scholar/)).toBeInTheDocument()
@@ -122,5 +121,52 @@ describe('App', () => {
     await userEvent.upload(input, new File(['%PDF'], 'p.pdf', { type: 'application/pdf' }))
     await waitFor(() => expect(api.uploadPdf).toHaveBeenCalledOnce())
     expect((await screen.findAllByText('Uploaded Paper')).length).toBeGreaterThan(0)
+  })
+
+  it('switches back to the Search tab from the Library', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (0)' }))
+    expect(screen.queryByPlaceholderText(/search papers/i)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
+    expect(screen.getByPlaceholderText(/search papers/i)).toBeInTheDocument()
+  })
+
+  it('the Upload PDF button opens the file chooser', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (0)' }))
+    const input = document.querySelector('input[type=file]')
+    const open = vi.spyOn(input, 'click')
+    await userEvent.click(screen.getByRole('button', { name: 'Upload PDF' }))
+    expect(open).toHaveBeenCalledOnce()
+    expect(input).toHaveAttribute('accept', 'application/pdf')
+  })
+
+  it('opens the detail panel when a paper title is clicked, and closes it again', async () => {
+    api.listLibrary.mockResolvedValue([saved])
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (1)' }))
+    await userEvent.click(screen.getByRole('heading', { name: 'Saved Paper' }))
+    expect(await screen.findByRole('button', { name: 'Generate summary' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.queryByRole('button', { name: 'Generate summary' })).not.toBeInTheDocument()
+  })
+
+  it('shows an upload error and keeps the library unchanged', async () => {
+    api.uploadPdf.mockRejectedValue(new Error('That file is not a PDF'))
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (0)' }))
+    const input = document.querySelector('input[type=file]')
+    await userEvent.upload(input, new File(['hi'], 'x.pdf', { type: 'application/pdf' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('not a PDF')
+    expect(screen.getByRole('button', { name: 'Library (0)' })).toBeInTheDocument()
+  })
+
+  it('does not remove a paper when the confirmation is declined', async () => {
+    api.listLibrary.mockResolvedValue([saved])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Library (1)' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(api.deletePaper).not.toHaveBeenCalled()
   })
 })

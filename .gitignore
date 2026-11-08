@@ -24,3 +24,7 @@ backend/uploads/
 htmlcov/
 coverage/
 .pytest_cache/
+
+# mutation testing output
+mutants/
+.mutmut-cache

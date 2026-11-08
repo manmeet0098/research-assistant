@@ -62,6 +62,3 @@ def test_upload_reports_502_when_llm_key_is_rejected(client, fake_llm):
     assert "API key" in response.json()["detail"]
     assert client.get("/api/library").json() == []
 
-
-def test_upload_requires_a_file(client):
-    assert client.post("/api/upload").status_code == 422

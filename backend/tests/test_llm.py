@@ -44,9 +44,17 @@ def test_summarize_abstract_only_notes_limitation(fake_llm):
     assert "abstract alone" in sent["system"]
 
 
-def test_response_cut_off_is_flagged(fake_llm):
+def test_response_cut_off_is_flagged_and_keeps_the_text(fake_llm):
+    fake_llm.reply = "partial summary"
     fake_llm.stop_reason = "max_tokens"
-    assert "cut off" in llm.summarize(FULL)
+    result = llm.summarize(FULL)
+    assert result.startswith("partial summary")
+    assert result.endswith(llm.CUT_OFF_NOTE)
+
+
+def test_complete_response_has_no_cut_off_note(fake_llm):
+    fake_llm.reply = "complete"
+    assert llm.summarize(FULL) == "complete"
 
 
 def test_answer_includes_history_and_question(fake_llm):
@@ -66,10 +74,23 @@ def test_answer_puts_paper_in_system_prompt(fake_llm):
     assert "FULL BODY TEXT" in fake_llm.calls[-1]["system"]
 
 
-def test_paper_text_is_truncated(fake_llm):
+def test_paper_text_is_truncated_to_the_limit(fake_llm):
     llm.summarize({"title": "T", "full_text": "x" * (llm.MAX_PAPER_CHARS + 5000)})
     content = fake_llm.calls[-1]["messages"][0]["content"]
-    assert len(content) < llm.MAX_PAPER_CHARS + 100
+    assert content.count("x") == llm.MAX_PAPER_CHARS
+
+
+def test_client_is_created_once_and_reused(monkeypatch):
+    created = []
+
+    class StubAnthropic:
+        def __init__(self):
+            created.append(self)
+
+    monkeypatch.setattr(llm.anthropic, "Anthropic", StubAnthropic)
+    monkeypatch.setattr(llm, "_client", None)
+    assert llm.client() is llm.client()
+    assert len(created) == 1
 
 
 def test_stream_summary_yields_chunks(fake_llm):
