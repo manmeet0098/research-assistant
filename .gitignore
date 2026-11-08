@@ -18,3 +18,9 @@ dist/
 backend/uploads/
 
 .DS_Store
+
+# test artifacts
+.coverage
+htmlcov/
+coverage/
+.pytest_cache/
